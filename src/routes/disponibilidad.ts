@@ -3,8 +3,8 @@ import { limpiarTexto, parseId, validarFechaHora } from '../lib/validation'
 import { generarSlots, fechaLocal, sumarDias, type Slot } from '../lib/slots'
 import { horariosDeMedico, citasOcupadas, tzOffset } from '../lib/citas'
 import { getCookie } from 'hono/cookie'
-import { verify } from 'hono/jwt'
-import type { AppEnv, SesionUsuario } from '../types'
+import { usuarioDesdeToken } from '../lib/auth'
+import type { AppEnv } from '../types'
 
 const disponibilidad = new Hono<AppEnv>()
 
@@ -144,21 +144,11 @@ disponibilidad.get('/resumen', async (c) => {
   return c.json({ fecha, resumen })
 })
 
-async function usuarioDesdeCookie(c: any): Promise<SesionUsuario | null> {
+/** Sesión opcional: no bloquea la petición si no hay cookie válida. */
+async function usuarioDesdeCookie(c: any) {
   const token = getCookie(c, 'citas_token')
   if (!token) return null
-  try {
-    const p = await verify(token, c.env.JWT_SECRET || 'dev-secret-citas-consultorio-2026', 'HS256')
-    return {
-      id: Number(p.sub),
-      email: String(p.email),
-      nombre: String(p.nombre),
-      rol: p.rol as SesionUsuario['rol'],
-      medico_id: p.medico_id == null ? null : Number(p.medico_id),
-    }
-  } catch {
-    return null
-  }
+  return usuarioDesdeToken(c.env, token, c.req.url)
 }
 
 export default disponibilidad

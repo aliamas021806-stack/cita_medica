@@ -381,13 +381,36 @@ pm2 logs webapp --nostream         # Ver logs
   `wrangler.jsonc` y ejecutar `npm run db:migrate:prod` + `npm run db:seed:prod`.
 
 ### Variables de entorno
-| Variable | Descripción | Valor por defecto |
+| Variable | Descripción | Obligatoria en producción |
 |---|---|---|
-| `JWT_SECRET` | Secreto para firmar los JWT | En local `secreto-local-...`; en producción debe definirse como secreto |
-| `TZ_OFFSET_MIN` | Offset en minutos respecto a UTC de la hora local del consultorio | `-300` (UTC-5) |
+| `JWT_SECRET` | Secreto con el que se firman los JWT de sesión | **Sí** (ver aviso) |
+| `TZ_OFFSET_MIN` | Offset en minutos respecto a UTC de la hora local del consultorio (`-300` = UTC-5) | No (por defecto `-300`) |
 
 En local se configuran en `.dev.vars` (no versionado). En producción deben cargarse como secretos de
 Cloudflare, nunca en el repositorio.
+
+> ### ⚠️ `JWT_SECRET` es obligatorio en producción
+>
+> El código usa **fallo en cerrado** (`fail closed`): si `JWT_SECRET` no está definido en producción,
+> `secreto()` devuelve `null`, **no se pueden crear ni validar sesiones** y se registra un error en el
+> log. Las peticiones autenticadas fallan con `401`.
+>
+> **El motivo es de seguridad.** El bundle del Worker (`dist/_worker.js`) es **público**: cualquiera
+> puede descargarlo y leerlo. Si el código llevara un secreto por defecto, cualquiera podría firmar
+> tokens válidos y **suplantar a cualquier usuario, incluido el administrador**. Por eso el secreto
+> por defecto está restringido a peticiones `http://` (solo el sandbox local) y nunca se aplica sobre
+> HTTPS.
+>
+> Configúralo **antes** del primer deploy:
+> ```bash
+> # Genera un secreto fuerte
+> openssl rand -base64 48
+>
+> # Guárdalo como secreto de Pages (lee el valor por stdin)
+> echo "<tu-secreto>" | npx wrangler pages secret put JWT_SECRET \
+>   --project-name <cloudflare_project_name>
+> ```
+> Si cambias este valor, todas las sesiones activas se invalidan (los usuarios deben volver a entrar).
 
 ---
 

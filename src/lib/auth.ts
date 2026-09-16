@@ -73,14 +73,70 @@ export async function verifyPassword(password: string, almacenado: string): Prom
 /* ------------------------------------------------------------------ */
 /* JWT en cookie httpOnly                                              */
 /* ------------------------------------------------------------------ */
-function secreto(env: Bindings): string {
-  return env.JWT_SECRET || 'dev-secret-citas-consultorio-2026'
+
+/** Secreto de conveniencia SOLO para el sandbox local (http://localhost). */
+const SECRETO_DEV = 'dev-secret-solo-para-desarrollo-local'
+
+/** ¿La petición llega por http (desarrollo local) o https (producción)? */
+function esLocal(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resuelve el secreto de firma de los JWT.
+ *
+ * En producción (`https`) `JWT_SECRET` es OBLIGATORIO: si falta se devuelve
+ * `null` y las sesiones quedan deshabilitadas (fallo en cerrado). Nunca se usa
+ * un secreto por defecto en producción, porque el bundle es público y un
+ * secreto conocido permitiría falsificar tokens y suplantar a cualquier usuario.
+ */
+export function secreto(env: Bindings, url: string): string | null {
+  if (env.JWT_SECRET) return env.JWT_SECRET
+  if (esLocal(url)) return SECRETO_DEV
+  console.error(
+    '[auth] JWT_SECRET no configurado en producción: las sesiones están deshabilitadas. ' +
+      'Defínelo con: wrangler pages secret put JWT_SECRET --project-name <proyecto>',
+  )
+  return null
+}
+
+/** Verifica un token y devuelve el usuario, o `null` si no es válido. */
+export async function usuarioDesdeToken(
+  env: Bindings,
+  token: string,
+  url: string,
+): Promise<SesionUsuario | null> {
+  const clave = secreto(env, url)
+  if (!clave) return null
+  try {
+    const payload = await verify(token, clave, 'HS256')
+    return {
+      id: Number(payload.sub),
+      email: String(payload.email),
+      nombre: String(payload.nombre),
+      rol: payload.rol as Rol,
+      medico_id: payload.medico_id == null ? null : Number(payload.medico_id),
+    }
+  } catch {
+    return null
+  }
 }
 
 export async function crearSesion(
   c: any,
   usuario: SesionUsuario,
 ): Promise<void> {
+  const clave = secreto(c.env, c.req.url)
+  if (!clave) {
+    throw new Error(
+      'JWT_SECRET no configurado: no es posible crear sesiones en producción sin él.',
+    )
+  }
+
   const exp = Math.floor(Date.now() / 1000) + DIAS_SESION * 86400
   const token = await sign(
     {
@@ -91,14 +147,13 @@ export async function crearSesion(
       medico_id: usuario.medico_id,
       exp,
     },
-    secreto(c.env),
+    clave,
     'HS256',
   )
-  const esLocal = new URL(c.req.url).protocol === 'http:'
   setCookie(c, COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: 'Lax',
-    secure: !esLocal,
+    secure: !esLocal(c.req.url),
     path: '/',
     maxAge: DIAS_SESION * 86400,
   })
@@ -111,18 +166,7 @@ export function cerrarSesion(c: any): void {
 async function leerSesion(c: any): Promise<SesionUsuario | null> {
   const token = getCookie(c, COOKIE_NAME)
   if (!token) return null
-  try {
-    const payload = await verify(token, secreto(c.env), 'HS256')
-    return {
-      id: Number(payload.sub),
-      email: String(payload.email),
-      nombre: String(payload.nombre),
-      rol: payload.rol as Rol,
-      medico_id: payload.medico_id == null ? null : Number(payload.medico_id),
-    }
-  } catch {
-    return null
-  }
+  return usuarioDesdeToken(c.env, token, c.req.url)
 }
 
 /** Adjunta el usuario a la petición si hay sesión válida; NO bloquea. */
