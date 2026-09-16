@@ -29,7 +29,8 @@ consulta su día de trabajo.
 
 | Entorno | URL |
 |---|---|
-| **Desarrollo (sandbox)** | `https://3000-<sandbox-id>.sandbox.novita.ai` |
+| **Repositorio GitHub** | https://github.com/aliamas021806-stack/cita_medica |
+| **Desarrollo (sandbox)** | `https://3000-<sandbox-id>.sandbox.novita.ai` (temporal: caduca con el sandbox) |
 | **Producción** | *(pendiente de despliegue — ver sección 10)* |
 | **Health check** | `/api/health` |
 
@@ -368,9 +369,16 @@ pm2 logs webapp --nostream         # Ver logs
 
 ### Estado del despliegue
 - ✅ Desarrollo local verificado de extremo a extremo.
-- ⏳ **Producción pendiente**: requiere elegir la ruta de despliegue (hosting gestionado de Genspark o
-  cuenta propia de Cloudflare) y crear la base D1 remota para sustituir
-  `PLACEHOLDER_DATABASE_ID` en `wrangler.jsonc`.
+- ✅ Código publicado en GitHub: https://github.com/aliamas021806-stack/cita_medica
+- ⏳ **Producción pendiente**. El proyecto está listo para desplegar (el *preflight* de bindings pasa
+  limpio: 1× D1, sin KV, sin R2, sin cron, `vars` correctas), pero el hosting gestionado de Genspark
+  está bloqueado por el plan de la cuenta (`plan: free`, 90.69 créditos; requiere plan de pago o
+  ≥500 créditos). Rutas posibles:
+  1. **Cloudflare propio (BYOK)**: pegar un API Token en la pestaña *Deploy* y ejecutar `npm run deploy`.
+  2. **Hosting de Genspark**: al actualizar el plan, funciona sin tocar el código.
+
+  En ambos casos hay que crear la base D1 remota, sustituir `PLACEHOLDER_DATABASE_ID` en
+  `wrangler.jsonc` y ejecutar `npm run db:migrate:prod` + `npm run db:seed:prod`.
 
 ### Variables de entorno
 | Variable | Descripción | Valor por defecto |
