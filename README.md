@@ -367,18 +367,84 @@ pm2 logs webapp --nostream         # Ver logs
 > `--d1=DB` en la CLI, porque wrangler crearía entonces una base local distinta y las migraciones no
 > coincidirían con la que usa el servidor).
 
+### Despliegue a producción (Cloudflare propio — BYOK)
+
+El proyecto se despliega en **tu propia cuenta de Cloudflare**. Todo el proceso está automatizado en
+un único script idempotente: si lo vuelves a ejecutar, **reutiliza** el proyecto de Pages, la base D1
+y el secreto `JWT_SECRET` en lugar de duplicarlos.
+
+#### Paso 1 — Configurar el API Token (lo hace el usuario)
+
+En la pestaña **Deploy** del proyecto, pega un API Token de Cloudflare con estos permisos:
+
+| Ámbito | Permiso |
+|---|---|
+| **Cloudflare Pages** | Edit |
+| **D1** | Edit |
+| **Account Settings** (opcional) | Read |
+
+El token se guarda en el almacén del proyecto y la herramienta `setup_cloudflare_api_key` lo expone
+en el sandbox como `CLOUDFLARE_API_TOKEN`.
+
+> ⚠️ **Sin ese token no es posible desplegar.** El sandbox no tiene credenciales de Cloudflare
+> (verificado: ni variables de entorno, ni `~/.wrangler`, ni archivos de configuración) y **no se
+> intenta `wrangler login` ni OAuth**, porque ninguno de los dos funciona en este entorno.
+
+#### Paso 2 — Ejecutar el despliegue
+
+```bash
+cd /home/user/webapp
+
+# Carga el token en el entorno del shell
+set -a && . ./.deploy.env && set +a   # o export CLOUDFLARE_API_TOKEN="..."
+
+./scripts/desplegar.sh
+```
+
+El script ejecuta en orden, y de forma idempotente:
+
+| Paso | Acción | Comando subyacente |
+|---|---|---|
+| 1 | Verifica la autenticación | `wrangler whoami` |
+| 2 | Crea el proyecto de Pages si no existe | `wrangler pages project create` |
+| 3 | Crea la base D1 remota y obtiene su ID | `wrangler d1 create` |
+| 4 | Sustituye `PLACEHOLDER_DATABASE_ID` en `wrangler.jsonc` | `sed -i` |
+| 5 | Genera `JWT_SECRET` y lo guarda como secreto | `wrangler pages secret put` |
+| 6 | Aplica migraciones y carga el seed | `wrangler d1 migrations apply --remote` + `execute --file=seed.sql` |
+| 7 | Compila y despliega | `npm run build` + `wrangler pages deploy` |
+
+Al terminar imprime la URL de producción y las credenciales de prueba.
+
+#### Paso 3 — Verificar
+
+```bash
+curl https://cita-medica-consultorio.pages.dev/api/health
+curl https://cita-medica-consultorio.pages.dev/api/especialidades
+```
+
+Las **cuentas demo** funcionan igual que en local (contraseña `Demo1234`): `paciente@demo.test`,
+`recepcion@demo.test`, `medico` = `laura.mendez@consultorio.test`.
+
+#### Equivalente manual (si prefieres paso a paso)
+
+```bash
+export CLOUDFLARE_API_TOKEN="tu-token"
+npx wrangler pages project create cita-medica-consultorio --production-branch main
+npx wrangler d1 create webapp-production          # copia el database_id a wrangler.jsonc
+npx wrangler d1 migrations apply webapp-production --remote
+npx wrangler d1 execute webapp-production --remote --file=./seed.sql
+openssl rand -base64 48 | npx wrangler pages secret put JWT_SECRET --project-name cita-medica-consultorio
+npm run build && npx wrangler pages deploy dist --project-name cita-medica-consultorio
+```
+
 ### Estado del despliegue
 - ✅ Desarrollo local verificado de extremo a extremo.
 - ✅ Código publicado en GitHub: https://github.com/aliamas021806-stack/cita_medica
-- ⏳ **Producción pendiente**. El proyecto está listo para desplegar (el *preflight* de bindings pasa
-  limpio: 1× D1, sin KV, sin R2, sin cron, `vars` correctas), pero el hosting gestionado de Genspark
-  está bloqueado por el plan de la cuenta (`plan: free`, 90.69 créditos; requiere plan de pago o
-  ≥500 créditos). Rutas posibles:
-  1. **Cloudflare propio (BYOK)**: pegar un API Token en la pestaña *Deploy* y ejecutar `npm run deploy`.
-  2. **Hosting de Genspark**: al actualizar el plan, funciona sin tocar el código.
-
-  En ambos casos hay que crear la base D1 remota, sustituir `PLACEHOLDER_DATABASE_ID` en
-  `wrangler.jsonc` y ejecutar `npm run db:migrate:prod` + `npm run db:seed:prod`.
+- ✅ Despliegue automatizado en `scripts/desplegar.sh` (idempotente, probado con `bash -n`).
+- ✅ *Preflight* de bindings limpio: 1× D1, sin KV, sin R2, sin cron, `vars` correctas.
+- ⏳ **Producción pendiente de credencial**. Bloqueada únicamente porque no hay API Token de Cloudflare
+  disponible en el sandbox (`setup_cloudflare_api_key` falla y `wrangler whoami` responde *"You are not
+  authenticated"*). El código está listo: no falta implementar nada.
 
 ### Variables de entorno
 | Variable | Descripción | Obligatoria en producción |

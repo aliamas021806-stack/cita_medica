@@ -10,6 +10,8 @@ dist/
 .env
 .env.*
 !.env.example
+# Credenciales de despliegue (CLOUDFLARE_API_TOKEN) - NUNCA versionar
+.deploy.env
 
 # PM2
 .pm2/
